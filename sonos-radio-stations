@@ -1,0 +1,130 @@
+#!/usr/bin/env python
+#
+#    Copyright (C) 2017 Simon Naunton
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# Code marked with IgnoreWarning comment is only to suppress output of following warning from SoCo:
+# "UserWarning: The output type of this method will probably change in the future to use SoCo data structures"
+
+import soco
+from argparse import ArgumentParser, ArgumentTypeError, PARSER
+from sys import exit, stderr
+import warnings #IgnoreWarning
+import socket
+
+def list(zone):
+    if args.verbose:
+        print >> stderr, 'Listing stations...'
+    with warnings.catch_warnings(): #IgnoreWarning 
+        warnings.simplefilter('ignore') #IgnoreWarning
+        stations = zone.get_favorite_radio_stations()
+        for station in stations['favorites']:
+             print args.format.format(title=station['title'], uri=station['uri'][20:], id=station['id'])
+
+def add(zone, title, uri):
+    if args.verbose:
+        print >> stderr, 'Adding station: "%s" "%s"' % (title, uri)
+    try:
+        zone.add_radio_station(title, uri)
+    except soco.exceptions.SoCoUPnPException as e:
+        if args.verbose:
+            print >> stderr, e.error_xml
+        else:
+            if e.error_code == '803':
+                print >> stderr, 'Error: A Radio Station with title "%s" already exists' % title
+            else:
+                print >> stderr, e
+        return False
+    return True
+
+def remove(zone, id):
+    if args.verbose:
+        print >> stderr, 'Removing station ' + str(id)
+    try:
+        zone.remove_radio_station(id)
+    except soco.exceptions.SoCoUPnPException as e:
+        if args.verbose:
+            print >> stderr, e.error_xml
+        else:
+            if e.error_code == "701":
+                print >> stderr, 'Error: A Radio Station with id %d does not exist' % id
+            else:
+                print >> stderr, e
+        return False
+    return True
+
+parser = ArgumentParser(description='List, add, and remove Radio Stations from a Sonos zone')
+cmds = parser.add_mutually_exclusive_group(required=True)
+cmds.add_argument('-lz', '--list-zones', action='store_true', help='List available Sonos zones')
+cmds.add_argument('-l', '--list', action='store_true', help='List Radio Stations in Sonos Zone')
+cmds.add_argument('-a', '--add', nargs=2, metavar=('TITLE', 'URI'), help='Add Radio Station')
+cmds.add_argument('-r', '--remove', type=int, metavar='ID', help='Remove Radio Station')
+parser.add_argument('-z', '--zone', metavar='ZONE', help='The Sonos zone to operate on. If a this is not specified the first zone found will be used.')
+parser.add_argument('-v', '--verbose', action='store_true', help='Tell you what is being done')
+parser.add_argument('-f', '--format', default='{title}|{uri}|{id}"', help='Format used for listing Radio Stations. By default this is "{title}|{uri}|{id}". This can be any string where {title} is replace with the title, {id} with the id, and {uri} with the uri.')
+args = parser.parse_args()
+
+zones = []
+try:
+  zones = soco.discover()
+except socket.error as e:
+  print >> stderr, 'Error: ' + str(e)
+  exit(2)
+
+if zones is None:
+  print >> stderr, 'Error: Unable to find Sonos. Is it connected to the network?'
+  exit(3)
+
+if args.list_zones:
+    if args.verbose:
+        print >> stderr, "Listing zones..."
+    for zone in zones:
+        print zone.player_name
+    exit(0)
+
+if args.verbose:
+    print >> stderr, 'Finding zone...'
+
+found_zone = False
+for zone in zones:
+    if args.zone is None:
+        if args.verbose:
+            print >> stderr, 'Using first zone found...'
+        found_zone = True
+        break
+    if zone.player_name == args.zone:
+        if args.verbose:
+            print >> stderr, 'Using --zone parameter...'
+        found_zone = True
+        break
+
+if found_zone is False:
+    print >> stderr, 'Zone%snot found' % (' "%s" ' % args.zone if args.zone is not None else " ")
+    exit(1)
+
+if args.verbose:
+    print >> stderr, 'Zone set to "%s"' % zone.player_name
+
+exit_status = 0
+if args.list:
+   list(zone)
+elif args.add:
+    if add(zone, args.add[0], args.add[1]) is False:
+        exit_status = 1
+elif args.remove:
+    if remove(zone, args.remove) is False:
+        exit_status = 1
+
+exit(exit_status)
